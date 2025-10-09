@@ -1,40 +1,54 @@
 <?php
 // ================================
-// BATCH DRAFT FUNCTION
+// BATCH DRAFT: Properties by es_status (Expired/Sold/Withdrawn…)
 // ================================
 function draft_properties_with_expired_status_batch($batch_size = 100, $page_num = 1, $status_slugs = []) {
     if (empty($status_slugs)) {
         $status_slugs = [
-            'expired', 'withdrawn', 'cancelled', 'contingent',
-            'sold-inner-office', 'sold-co-op-w/mbr', 'sold-before-input', 'sold-other'
+            'expired',
+            'withdrawn',
+            'cancelled',
+            'contingent',
+            'sold-inner-office',
+            'sold-co-op-w/mbr',
+            'sold-before-input',
+            'sold-other',
         ];
     }
 
     $args = [
-        'post_type'      => 'properties',
-        'post_status'    => 'publish',
-        'posts_per_page' => $batch_size,
-        'paged'          => $page_num,
-        'fields'         => 'ids',
-        'no_found_rows'  => false,
-        'tax_query'      => [
+        'post_type'              => 'properties',
+        'post_status'            => 'publish', // Only Published -> Draft
+        'posts_per_page'         => max(1, (int)$batch_size),
+        'paged'                  => max(1, (int)$page_num),
+        'fields'                 => 'ids',
+        'no_found_rows'          => false,     // we want found_posts/max pages
+        'update_post_meta_cache' => false,
+        'update_post_term_cache' => false,
+        'tax_query'              => [
             [
                 'taxonomy' => 'es_status',
                 'field'    => 'slug',
-                'terms'    => $status_slugs,
+                'terms'    => array_map('sanitize_title', $status_slugs),
             ],
         ],
     ];
 
+    // Be more forgiving for long-running batches
     if (function_exists('set_time_limit')) @set_time_limit(60);
 
     $q = new WP_Query($args);
-    $changed = 0;
 
+    $changed = 0;
     if (!empty($q->posts)) {
         foreach ($q->posts as $post_id) {
-            $res = wp_update_post(['ID' => $post_id, 'post_status' => 'draft'], true);
-            if (!is_wp_error($res)) $changed++;
+            $res = wp_update_post([
+                'ID'          => $post_id,
+                'post_status' => 'draft',
+            ], true);
+            if (!is_wp_error($res)) {
+                $changed++;
+            }
         }
     }
 
@@ -44,34 +58,43 @@ function draft_properties_with_expired_status_batch($batch_size = 100, $page_num
         'changed'     => $changed,
         'has_more'    => ($q->max_num_pages > $page_num),
         'total_found' => (int) $q->found_posts,
-        'page'        => $page_num,
+        'page'        => (int) $page_num,
+        'batch_size'  => (int) $batch_size,
     ];
 }
 
 
 // ================================
-// BATCH DELETE FUNCTION
+// BATCH DELETE: Draft Properties by es_status
 // ================================
 function delete_draft_properties_with_status_batch($batch_size = 100, $page_num = 1, $status_slugs = []) {
     if (empty($status_slugs)) {
         $status_slugs = [
-            'expired', 'withdrawn', 'cancelled', 'contingent',
-            'sold-inner-office', 'sold-co-op-w/mbr', 'sold-before-input', 'sold-other'
+            'expired',
+            'withdrawn',
+            'cancelled',
+            'contingent',
+            'sold-inner-office',
+            'sold-co-op-w/mbr',
+            'sold-before-input',
+            'sold-other',
         ];
     }
 
     $args = [
-        'post_type'      => 'properties',
-        'post_status'    => 'draft',
-        'posts_per_page' => $batch_size,
-        'paged'          => $page_num,
-        'fields'         => 'ids',
-        'no_found_rows'  => false,
-        'tax_query'      => [
+        'post_type'              => 'properties',
+        'post_status'            => 'draft',   // Only Drafts -> Delete
+        'posts_per_page'         => max(1, (int)$batch_size),
+        'paged'                  => max(1, (int)$page_num),
+        'fields'                 => 'ids',
+        'no_found_rows'          => false,
+        'update_post_meta_cache' => false,
+        'update_post_term_cache' => false,
+        'tax_query'              => [
             [
                 'taxonomy' => 'es_status',
                 'field'    => 'slug',
-                'terms'    => $status_slugs,
+                'terms'    => array_map('sanitize_title', $status_slugs),
             ],
         ],
     ];
@@ -79,21 +102,24 @@ function delete_draft_properties_with_status_batch($batch_size = 100, $page_num 
     if (function_exists('set_time_limit')) @set_time_limit(60);
 
     $q = new WP_Query($args);
-    $deleted = 0;
 
+    $deleted = 0;
     if (!empty($q->posts)) {
         foreach ($q->posts as $post_id) {
-            if (wp_delete_post($post_id, true)) $deleted++;
+            if (wp_delete_post($post_id, true)) { // true = skip trash
+                $deleted++;
+            }
         }
     }
 
     wp_reset_postdata();
 
     return [
-        'deleted'     => $deleted,
-        'has_more'    => ($q->max_num_pages > $page_num),
-        'total_found' => (int) $q->found_posts,
-        'page'        => $page_num,
+        'deleted'    => $deleted,
+        'has_more'   => ($q->max_num_pages > $page_num),
+        'total_found'=> (int) $q->found_posts,
+        'page'       => (int) $page_num,
+        'batch_size' => (int) $batch_size,
     ];
 }
 
@@ -115,38 +141,54 @@ add_action('admin_menu', 'wts_register_expired_draft_admin_page');
 
 
 function wts_expired_draft_admin_page() {
+    // Defaults (can be changed in the form)
     $default_status_slugs = 'expired,withdrawn,cancelled,contingent,sold-inner-office,sold-co-op-w/mbr,sold-before-input,sold-other';
 
-    // Run Draft Batches
+    // --- Handle Draft Batch ---
     $draft_result = null;
-    $draft_ran = false;
+    $draft_ran    = false;
 
     if (isset($_POST['wts_run_draft_expired']) && check_admin_referer('wts_draft_expired_action')) {
-        $draft_result = draft_properties_with_expired_status_batch(100, (int)($_POST['wts_draft_page'] ?? 1));
-        $draft_ran = true;
+        $draft_batch_size = max(1, (int) ($_POST['wts_draft_batch_size'] ?? 100));
+        $draft_page       = max(1, (int) ($_POST['wts_draft_page'] ?? 1));
+        $auto_continue_d  = !empty($_POST['wts_draft_auto_continue']);
+        $status_input_d   = trim($_POST['wts_draft_status_slugs'] ?? $default_status_slugs);
+        $status_slugs_d   = array_filter(array_map('sanitize_title', array_map('trim', explode(',', $status_input_d))));
+
+        $draft_result = draft_properties_with_expired_status_batch($draft_batch_size, $draft_page, $status_slugs_d);
+        $draft_ran    = true;
     }
 
-    // Run Delete Batches
+    // --- Handle Delete Batch ---
     $delete_result = null;
-    $delete_ran = false;
+    $delete_ran    = false;
 
     if (isset($_POST['wts_run_delete_draft_expired']) && check_admin_referer('wts_delete_draft_expired_action')) {
-        $delete_result = delete_draft_properties_with_status_batch(100, (int)($_POST['wts_delete_page'] ?? 1));
-        $delete_ran = true;
+        $delete_batch_size = max(1, (int) ($_POST['wts_delete_batch_size'] ?? 100));
+        $delete_page       = max(1, (int) ($_POST['wts_delete_page'] ?? 1));
+        $auto_continue_del = !empty($_POST['wts_delete_auto_continue']);
+        $status_input_del  = trim($_POST['wts_delete_status_slugs'] ?? $default_status_slugs);
+        $status_slugs_del  = array_filter(array_map('sanitize_title', array_map('trim', explode(',', $status_input_del))));
+
+        $delete_result = delete_draft_properties_with_status_batch($delete_batch_size, $delete_page, $status_slugs_del);
+        $delete_ran    = true;
     }
+
     ?>
     <div class="wrap">
-        <h1>Manage Expired/Withdrawn Properties</h1>
+        <h1>Manage Expired/Withdrawn Properties (Batch Mode)</h1>
 
-        <!-- STEP 1: Move to Draft -->
-        <h2>Step 1: Move to Draft (Batch Mode)</h2>
-        <p>Moves all <strong>Published</strong> properties with matching statuses to <strong>Draft</strong>.</p>
+        <!-- STEP 1: Move Published to Draft -->
+        <h2>Step 1: Move to Draft (by Status)</h2>
+        <p>Processes <code>properties</code> that are <strong>Published</strong> and have matching <code>es_status</code> terms. Runs in batches to avoid timeouts.</p>
 
         <?php if ($draft_ran && $draft_result): ?>
             <div class="notice notice-info">
-                <p><strong>Draft Batch Results:</strong></p>
-                <ul>
+                <p><strong>Draft Batch Results</strong></p>
+                <ul style="margin-left:1em;">
                     <li>Batch page: <?php echo esc_html($draft_result['page']); ?></li>
+                    <li>Batch size: <?php echo esc_html($draft_result['batch_size']); ?></li>
+                    <li>Total matching (estimate): <?php echo esc_html($draft_result['total_found']); ?></li>
                     <li>Changed to Draft this batch: <strong><?php echo esc_html($draft_result['changed']); ?></strong></li>
                     <li>More batches available: <?php echo $draft_result['has_more'] ? '<strong>Yes</strong>' : 'No'; ?></li>
                 </ul>
@@ -155,25 +197,42 @@ function wts_expired_draft_admin_page() {
 
         <form method="post">
             <?php wp_nonce_field('wts_draft_expired_action'); ?>
-            <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-            <input type="hidden" name="wts_draft_batch_size" value="100">
-            <input type="hidden" name="wts_draft_page" value="<?php echo esc_attr($_POST['wts_draft_page'] ?? 1); ?>">
-
-            <p>
-                <label>
-                    <input type="checkbox" name="wts_draft_auto_continue" value="1" <?php checked(!empty($_POST['wts_draft_auto_continue'])); ?>>
-                    Automatically continue through all batches
-                </label>
-            </p>
+            <table class="form-table">
+                <tr>
+                    <th><label for="wts_draft_status_slugs">Status slugs</label></th>
+                    <td>
+                        <input type="text" class="regular-text" id="wts_draft_status_slugs" name="wts_draft_status_slugs"
+                               value="<?php echo esc_attr($_POST['wts_draft_status_slugs'] ?? $default_status_slugs); ?>">
+                        <p class="description">Comma-separated slugs in taxonomy <code>es_status</code>.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="wts_draft_batch_size">Batch size</label></th>
+                    <td><input type="number" id="wts_draft_batch_size" name="wts_draft_batch_size" min="1" step="1"
+                               value="<?php echo esc_attr($_POST['wts_draft_batch_size'] ?? 100); ?>"></td>
+                </tr>
+                <tr>
+                    <th><label for="wts_draft_page">Batch page</label></th>
+                    <td><input type="number" id="wts_draft_page" name="wts_draft_page" min="1" step="1"
+                               value="<?php echo esc_attr($_POST['wts_draft_page'] ?? 1); ?>"></td>
+                </tr>
+                <tr>
+                    <th>Auto-continue</th>
+                    <td>
+                        <label><input type="checkbox" name="wts_draft_auto_continue" value="1"
+                            <?php checked(!empty($_POST['wts_draft_auto_continue'])); ?>> Run next batch automatically</label>
+                    </td>
+                </tr>
+            </table>
             <p><input type="submit" name="wts_run_draft_expired" class="button button-primary" value="Run Draft Batch"></p>
         </form>
 
         <?php if ($draft_ran && $draft_result && $draft_result['has_more']): ?>
             <form method="post" id="wts-draft-next-form" style="display:none;">
                 <?php wp_nonce_field('wts_draft_expired_action'); ?>
-                <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-                <input type="hidden" name="wts_draft_batch_size" value="100">
-                <input type="hidden" name="wts_draft_page" value="<?php echo esc_attr(($draft_result['page'] + 1)); ?>">
+                <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($_POST['wts_draft_status_slugs'] ?? $default_status_slugs); ?>">
+                <input type="hidden" name="wts_draft_batch_size"  value="<?php echo esc_attr($_POST['wts_draft_batch_size'] ?? 100); ?>">
+                <input type="hidden" name="wts_draft_page"        value="<?php echo esc_attr(($draft_result['page'] + 1)); ?>">
                 <input type="hidden" name="wts_draft_auto_continue" value="<?php echo !empty($_POST['wts_draft_auto_continue']) ? '1' : ''; ?>">
                 <input type="hidden" name="wts_run_draft_expired" value="1">
             </form>
@@ -183,9 +242,9 @@ function wts_expired_draft_admin_page() {
             <?php else: ?>
                 <form method="post">
                     <?php wp_nonce_field('wts_draft_expired_action'); ?>
-                    <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-                    <input type="hidden" name="wts_draft_batch_size" value="100">
-                    <input type="hidden" name="wts_draft_page" value="<?php echo esc_attr(($draft_result['page'] + 1)); ?>">
+                    <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($_POST['wts_draft_status_slugs'] ?? $default_status_slugs); ?>">
+                    <input type="hidden" name="wts_draft_batch_size"  value="<?php echo esc_attr($_POST['wts_draft_batch_size'] ?? 100); ?>">
+                    <input type="hidden" name="wts_draft_page"        value="<?php echo esc_attr(($draft_result['page'] + 1)); ?>">
                     <input type="hidden" name="wts_run_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Draft Batch</button></p>
                 </form>
@@ -197,41 +256,59 @@ function wts_expired_draft_admin_page() {
         <hr>
 
         <!-- STEP 2: Delete Drafts -->
-        <h2>Step 2: Delete Drafted Properties (Batch Mode)</h2>
-        <p>Deletes all <strong>Draft</strong> properties with matching statuses in safe batches.</p>
+        <h2>Step 2: Delete Drafted Properties (by Status)</h2>
+        <p>Deletes <code>properties</code> that are currently <strong>Draft</strong> and have the selected <code>es_status</code> terms. Runs in batches for safety.</p>
 
         <?php if ($delete_ran && $delete_result): ?>
             <div class="notice notice-warning">
-                <p><strong>Delete Batch Results:</strong></p>
-                <ul>
+                <p><strong>Delete Batch Results</strong></p>
+                <ul style="margin-left:1em;">
                     <li>Batch page: <?php echo esc_html($delete_result['page']); ?></li>
+                    <li>Batch size: <?php echo esc_html($delete_result['batch_size']); ?></li>
+                    <li>Total matching (estimate): <?php echo esc_html($delete_result['total_found']); ?></li>
                     <li>Deleted this batch: <strong><?php echo esc_html($delete_result['deleted']); ?></strong></li>
                     <li>More batches available: <?php echo $delete_result['has_more'] ? '<strong>Yes</strong>' : 'No'; ?></li>
                 </ul>
             </div>
         <?php endif; ?>
 
-        <form method="post" onsubmit="return confirm('Are you sure? This permanently deletes matching draft posts.')">
+        <form method="post" onsubmit="return confirm('Are you sure? This permanently deletes matching draft posts.');">
             <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
-            <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-            <input type="hidden" name="wts_delete_batch_size" value="100">
-            <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr($_POST['wts_delete_page'] ?? 1); ?>">
-
-            <p>
-                <label>
-                    <input type="checkbox" name="wts_delete_auto_continue" value="1" <?php checked(!empty($_POST['wts_delete_auto_continue'])); ?>>
-                    Automatically continue through all batches
-                </label>
-            </p>
+            <table class="form-table">
+                <tr>
+                    <th><label for="wts_delete_status_slugs">Status slugs</label></th>
+                    <td>
+                        <input type="text" class="regular-text" id="wts_delete_status_slugs" name="wts_delete_status_slugs"
+                               value="<?php echo esc_attr($_POST['wts_delete_status_slugs'] ?? $default_status_slugs); ?>">
+                    </td>
+                </tr>
+                <tr>
+                    <th><label for="wts_delete_batch_size">Batch size</label></th>
+                    <td><input type="number" id="wts_delete_batch_size" name="wts_delete_batch_size" min="1" step="1"
+                               value="<?php echo esc_attr($_POST['wts_delete_batch_size'] ?? 100); ?>"></td>
+                </tr>
+                <tr>
+                    <th><label for="wts_delete_page">Batch page</label></th>
+                    <td><input type="number" id="wts_delete_page" name="wts_delete_page" min="1" step="1"
+                               value="<?php echo esc_attr($_POST['wts_delete_page'] ?? 1); ?>"></td>
+                </tr>
+                <tr>
+                    <th>Auto-continue</th>
+                    <td>
+                        <label><input type="checkbox" name="wts_delete_auto_continue" value="1"
+                            <?php checked(!empty($_POST['wts_delete_auto_continue'])); ?>> Run next batch automatically</label>
+                    </td>
+                </tr>
+            </table>
             <p><input type="submit" name="wts_run_delete_draft_expired" class="button button-danger" value="Run Delete Batch"></p>
         </form>
 
         <?php if ($delete_ran && $delete_result && $delete_result['has_more']): ?>
             <form method="post" id="wts-delete-next-form" style="display:none;">
                 <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
-                <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-                <input type="hidden" name="wts_delete_batch_size" value="100">
-                <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
+                <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($_POST['wts_delete_status_slugs'] ?? $default_status_slugs); ?>">
+                <input type="hidden" name="wts_delete_batch_size"  value="<?php echo esc_attr($_POST['wts_delete_batch_size'] ?? 100); ?>">
+                <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
                 <input type="hidden" name="wts_delete_auto_continue" value="<?php echo !empty($_POST['wts_delete_auto_continue']) ? '1' : ''; ?>">
                 <input type="hidden" name="wts_run_delete_draft_expired" value="1">
             </form>
@@ -241,9 +318,9 @@ function wts_expired_draft_admin_page() {
             <?php else: ?>
                 <form method="post">
                     <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
-                    <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-                    <input type="hidden" name="wts_delete_batch_size" value="100">
-                    <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
+                    <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($_POST['wts_delete_status_slugs'] ?? $default_status_slugs); ?>">
+                    <input type="hidden" name="wts_delete_batch_size"  value="<?php echo esc_attr($_POST['wts_delete_batch_size'] ?? 100); ?>">
+                    <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
                     <input type="hidden" name="wts_run_delete_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Delete Batch</button></p>
                 </form>

@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.3.3 - 10-09-2025
+- Batch UI Adjustments and Testing.
+
 2.3.2 - 10-09-2025
 - Cleaned up the Draft page UI.
 
