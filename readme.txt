@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.3.2 - 10-09-2025
+- Cleaned up the Draft page UI.
+
 2.3.1 - 10-09-2025
 - Adjustment to batch quantity to avoid server timeouts.
 - Added batch options to delete drafted properties.
