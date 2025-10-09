@@ -1,5 +1,10 @@
 == Changelog ==
 
+2.3.1 - 10-09-2025
+- Adjustment to batch quantity to avoid server timeouts.
+- Added batch options to delete drafted properties.
+- Increased timeout from 800 to 2000 (2-seconds).
+
 2.3.0 - 10-09-2025
 - Draft expired-withdrawn properties in batches. 
 
