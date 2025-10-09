@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.2.2 - 10-09-2025
+- Added Site Title to email notifications subject line.
+
 2.2.1 - 10-09-2025
 - Updated Version Checker to ensure propert fectching of updates.
 

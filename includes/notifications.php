@@ -3,6 +3,12 @@
 // HELPERS: Fetch & Validate Names
 // ================================
 
+// Site label for email subjects (decodes HTML entities safely)
+function wts_site_label() {
+    return wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
+}
+
+
 // Get Builder Names (Title + Alternate Field)
 function wts_get_builder_names() {
     $builder_query = new WP_Query([
@@ -176,7 +182,7 @@ function wts_send_post_notification_digest() {
     $admin_users = get_users(['role' => 'Administrator']);
     $emails = wp_list_pluck($admin_users, 'user_email');
 
-    $subject = "Post/Property Digest: " . count($notifications) . " changes detected";
+    $subject = wts_site_label() . ', Post/Property Digest: ' . count($notifications) . ' changes detected';
 
     $rows = '';
     foreach ($notifications as $note) {
@@ -263,7 +269,7 @@ function wts_check_for_new_property_posts_to_notify() {
             $admin_users = get_users(['role' => 'Administrator']);
             $emails = wp_list_pluck($admin_users, 'user_email');
 
-            $subject = "Property Digest: {$count} new properties added";
+            $subject = wts_site_label() . ", Property Digest: {$count} new properties added";
             $message = "<p>The following new Property posts have been added in the last 24 hours:</p>
                 <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
                     <thead>
@@ -383,7 +389,7 @@ function wts_send_test_notification_email() {
     $admin_users = get_users(['role' => 'Administrator']);
     $emails = wp_list_pluck($admin_users, 'user_email');
 
-    $subject = "Property Digest: Test Email";
+    $subject = wts_site_label() . ', Property Digest: Test Email';
 
     $rows = "
         <tr>
