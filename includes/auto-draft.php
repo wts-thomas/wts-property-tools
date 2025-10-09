@@ -52,7 +52,7 @@ function draft_properties_with_expired_status_batch($batch_size = 100, $page_num
 // ================================
 // BATCH DELETE FUNCTION
 // ================================
-function delete_draft_properties_with_status_batch($batch_size = 50, $page_num = 1, $status_slugs = []) {
+function delete_draft_properties_with_status_batch($batch_size = 25, $page_num = 1, $status_slugs = []) {
     if (empty($status_slugs)) {
         $status_slugs = [
             'expired', 'withdrawn', 'cancelled', 'contingent',
@@ -117,6 +117,13 @@ add_action('admin_menu', 'wts_register_expired_draft_admin_page');
 function wts_expired_draft_admin_page() {
     $default_status_slugs = 'expired,withdrawn,cancelled,contingent,sold-inner-office,sold-co-op-w/mbr,sold-before-input,sold-other';
 
+    // STOP AUTO MODE
+    if (isset($_POST['wts_stop_auto']) && check_admin_referer('wts_stop_auto_action')) {
+        // Clear any auto-continue flags for this request
+        unset($_POST['wts_draft_auto_continue'], $_POST['wts_delete_auto_continue']);
+        echo '<div class="notice notice-warning is-dismissible"><p><strong>Auto Mode stopped.</strong> You can continue manually whenever you’re ready.</p></div>';
+    }
+
     // Run Draft Batches
     $draft_result = null;
     $draft_ran = false;
@@ -131,7 +138,7 @@ function wts_expired_draft_admin_page() {
     $delete_ran = false;
 
     if (isset($_POST['wts_run_delete_draft_expired']) && check_admin_referer('wts_delete_draft_expired_action')) {
-        $delete_result = delete_draft_properties_with_status_batch(50, (int)($_POST['wts_delete_page'] ?? 1));
+        $delete_result = delete_draft_properties_with_status_batch(25, (int)($_POST['wts_delete_page'] ?? 1));
         $delete_ran = true;
     }
     ?>
@@ -153,7 +160,7 @@ function wts_expired_draft_admin_page() {
             </div>
         <?php endif; ?>
 
-        <form method="post">
+        <form method="post" style="margin-bottom:10px;">
             <?php wp_nonce_field('wts_draft_expired_action'); ?>
             <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
             <input type="hidden" name="wts_draft_batch_size" value="100">
@@ -180,6 +187,11 @@ function wts_expired_draft_admin_page() {
             <?php if (!empty($_POST['wts_draft_auto_continue'])): ?>
                 <script>setTimeout(function(){document.getElementById('wts-draft-next-form').submit();}, 2000);</script>
                 <div class="notice notice-info"><p>Auto-continue is ON. Next draft batch will run automatically…</p></div>
+                <form method="post" style="margin-top:8px;">
+                    <?php wp_nonce_field('wts_stop_auto_action'); ?>
+                    <input type="hidden" name="wts_stop_auto" value="1">
+                    <button class="button">Stop Auto Mode</button>
+                </form>
             <?php else: ?>
                 <form method="post">
                     <?php wp_nonce_field('wts_draft_expired_action'); ?>
@@ -198,7 +210,7 @@ function wts_expired_draft_admin_page() {
 
         <!-- STEP 2: Delete Drafts -->
         <h2>Step 2: Delete Drafted Properties (Batch Mode)</h2>
-        <p>Deletes all <strong>Draft</strong> properties with matching statuses in safe batches of 50.</p>
+        <p>Deletes all <strong>Draft</strong> properties with matching statuses in safe batches of <strong>25</strong>.</p>
 
         <?php if ($delete_ran && $delete_result): ?>
             <div class="notice notice-warning">
@@ -211,10 +223,10 @@ function wts_expired_draft_admin_page() {
             </div>
         <?php endif; ?>
 
-        <form method="post" onsubmit="return confirm('Are you sure? This permanently deletes matching draft posts.')">
+        <form method="post" onsubmit="return confirm('Are you sure? This permanently deletes matching draft posts.')" style="margin-bottom:10px;">
             <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
             <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-            <input type="hidden" name="wts_delete_batch_size" value="50">
+            <input type="hidden" name="wts_delete_batch_size" value="25">
             <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr($_POST['wts_delete_page'] ?? 1); ?>">
 
             <p>
@@ -230,7 +242,7 @@ function wts_expired_draft_admin_page() {
             <form method="post" id="wts-delete-next-form" style="display:none;">
                 <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
                 <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-                <input type="hidden" name="wts_delete_batch_size" value="50">
+                <input type="hidden" name="wts_delete_batch_size" value="25">
                 <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
                 <input type="hidden" name="wts_delete_auto_continue" value="<?php echo !empty($_POST['wts_delete_auto_continue']) ? '1' : ''; ?>">
                 <input type="hidden" name="wts_run_delete_draft_expired" value="1">
@@ -238,11 +250,16 @@ function wts_expired_draft_admin_page() {
             <?php if (!empty($_POST['wts_delete_auto_continue'])): ?>
                 <script>setTimeout(function(){document.getElementById('wts-delete-next-form').submit();}, 2000);</script>
                 <div class="notice notice-info"><p>Auto-continue is ON. Next delete batch will run automatically…</p></div>
+                <form method="post" style="margin-top:8px;">
+                    <?php wp_nonce_field('wts_stop_auto_action'); ?>
+                    <input type="hidden" name="wts_stop_auto" value="1">
+                    <button class="button">Stop Auto Mode</button>
+                </form>
             <?php else: ?>
-                <form method="post">
+                <form method="post" onsubmit="return confirm('Run the next delete batch now?');">
                     <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
                     <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($default_status_slugs); ?>">
-                    <input type="hidden" name="wts_delete_batch_size" value="50">
+                    <input type="hidden" name="wts_delete_batch_size" value="25">
                     <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
                     <input type="hidden" name="wts_run_delete_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Delete Batch</button></p>

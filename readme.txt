@@ -1,5 +1,9 @@
 == Changelog ==
 
+2.3.5 - 10-09-2025
+- Decreased amount of properties deleted.
+- Added a Stop button for Auto batches.
+
 2.3.4 - 10-09-2025
 - Adjusted Deleted counts to mitigate server timeouts.
 
