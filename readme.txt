@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.3.6 - 10-09-2025
+- Optimzed Batch Draft and Batch Delete functions.
+
 2.3.5 - 10-09-2025
 - Decreased amount of properties deleted.
 - Added a Stop button for Auto batches.

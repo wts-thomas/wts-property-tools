@@ -1,6 +1,6 @@
 <?php
 // ================================
-// BATCH DRAFT FUNCTION
+// BATCH DRAFT FUNCTION (optimized)
 // ================================
 function draft_properties_with_expired_status_batch($batch_size = 100, $page_num = 1, $status_slugs = []) {
     if (empty($status_slugs)) {
@@ -11,17 +11,24 @@ function draft_properties_with_expired_status_batch($batch_size = 100, $page_num
     }
 
     $args = [
-        'post_type'      => 'properties',
-        'post_status'    => 'publish',
-        'posts_per_page' => $batch_size,
-        'paged'          => $page_num,
-        'fields'         => 'ids',
-        'no_found_rows'  => false,
-        'tax_query'      => [
+        'post_type'                   => 'properties',
+        'post_status'                 => 'publish',
+        'posts_per_page'              => $batch_size,
+        'paged'                       => $page_num,
+        'fields'                      => 'ids',
+        'orderby'                     => 'ID',
+        'order'                       => 'ASC',
+        'no_found_rows'               => true,  // <- avoid COUNT(*)
+        'cache_results'               => false,
+        'update_post_meta_cache'      => false,
+        'update_post_term_cache'      => false,
+        'suppress_filters'            => true,
+        'tax_query'                   => [
             [
                 'taxonomy' => 'es_status',
                 'field'    => 'slug',
                 'terms'    => $status_slugs,
+                'operator' => 'IN',
             ],
         ],
     ];
@@ -29,28 +36,30 @@ function draft_properties_with_expired_status_batch($batch_size = 100, $page_num
     if (function_exists('set_time_limit')) @set_time_limit(60);
 
     $q = new WP_Query($args);
+    $ids = !empty($q->posts) ? $q->posts : [];
     $changed = 0;
 
-    if (!empty($q->posts)) {
-        foreach ($q->posts as $post_id) {
-            $res = wp_update_post(['ID' => $post_id, 'post_status' => 'draft'], true);
-            if (!is_wp_error($res)) $changed++;
-        }
+    foreach ($ids as $post_id) {
+        $res = wp_update_post(['ID' => $post_id, 'post_status' => 'draft'], true);
+        if (!is_wp_error($res)) $changed++;
     }
 
     wp_reset_postdata();
 
+    // Has more = we filled this page completely
+    $has_more = (count($ids) === (int) $batch_size);
+
     return [
         'changed'     => $changed,
-        'has_more'    => ($q->max_num_pages > $page_num),
-        'total_found' => (int) $q->found_posts,
+        'has_more'    => $has_more,
+        'total_found' => null,   // no total count (faster)
         'page'        => $page_num,
     ];
 }
 
 
 // ================================
-// BATCH DELETE FUNCTION
+// BATCH DELETE FUNCTION (optimized)
 // ================================
 function delete_draft_properties_with_status_batch($batch_size = 25, $page_num = 1, $status_slugs = []) {
     if (empty($status_slugs)) {
@@ -61,17 +70,24 @@ function delete_draft_properties_with_status_batch($batch_size = 25, $page_num =
     }
 
     $args = [
-        'post_type'      => 'properties',
-        'post_status'    => 'draft',
-        'posts_per_page' => $batch_size,
-        'paged'          => $page_num,
-        'fields'         => 'ids',
-        'no_found_rows'  => false,
-        'tax_query'      => [
+        'post_type'                   => 'properties',
+        'post_status'                 => 'draft',
+        'posts_per_page'              => $batch_size,
+        'paged'                       => $page_num,
+        'fields'                      => 'ids',
+        'orderby'                     => 'ID',
+        'order'                       => 'ASC',
+        'no_found_rows'               => true,  // <- avoid COUNT(*)
+        'cache_results'               => false,
+        'update_post_meta_cache'      => false,
+        'update_post_term_cache'      => false,
+        'suppress_filters'            => true,
+        'tax_query'                   => [
             [
                 'taxonomy' => 'es_status',
                 'field'    => 'slug',
                 'terms'    => $status_slugs,
+                'operator' => 'IN',
             ],
         ],
     ];
@@ -79,20 +95,22 @@ function delete_draft_properties_with_status_batch($batch_size = 25, $page_num =
     if (function_exists('set_time_limit')) @set_time_limit(60);
 
     $q = new WP_Query($args);
+    $ids = !empty($q->posts) ? $q->posts : [];
     $deleted = 0;
 
-    if (!empty($q->posts)) {
-        foreach ($q->posts as $post_id) {
-            if (wp_delete_post($post_id, true)) $deleted++;
-        }
+    foreach ($ids as $post_id) {
+        if (wp_delete_post($post_id, true)) $deleted++;
     }
 
     wp_reset_postdata();
 
+    // Has more = we filled this page completely
+    $has_more = (count($ids) === (int) $batch_size);
+
     return [
         'deleted'     => $deleted,
-        'has_more'    => ($q->max_num_pages > $page_num),
-        'total_found' => (int) $q->found_posts,
+        'has_more'    => $has_more,
+        'total_found' => null,   // no total count (faster)
         'page'        => $page_num,
     ];
 }
