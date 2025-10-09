@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.2.1 - 10-09-2025
+- Updated Version Checker to ensure propert fectching of updates.
+
 2.2.0 - 10-09-2025
 - Reordered the Tables to show Match first.
 - Adjustments to the Cron email template.
