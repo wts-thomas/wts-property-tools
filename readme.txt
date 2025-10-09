@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.3.4 - 10-09-2025
+- Adjusted Deleted counts to mitigate server timeouts.
+
 2.3.3 - 10-09-2025
 - Batch UI Adjustments and Testing.
 
