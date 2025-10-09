@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.3.0 - 10-09-2025
+- Draft expired-withdrawn properties in batches. 
+
 2.2.2 - 10-09-2025
 - Added Site Title to email notifications subject line.
 
