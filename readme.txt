@@ -2,6 +2,7 @@
 
 2.2.0 - 10-09-2025
 - Reordered the Tables to show Match first.
+- Adjustments to the Cron email template.
 
 2.1.1 - 10-08-2025
 - Added 'Contingent' to the draft terms list
