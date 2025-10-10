@@ -1,12 +1,8 @@
 <?php
-/**
- * Property Status Tools (Batch Draft + Batch Delete w/ media preserved)
- * Drop this into your plugin as auto-draft.php or similar.
- */
 
-// ---------------------------
-// Defaults
-// ---------------------------
+/* ---------------------------
+ * Defaults
+ * --------------------------- */
 function wts_status_slugs_default() {
     // Slugs to act on (taxonomy: es_status)
     return [
@@ -20,13 +16,16 @@ function wts_status_slugs_default() {
         'sold-other',
     ];
 }
-function wts_draft_batch_size_default()  { return 100; } // draft 100 at a time
-function wts_delete_batch_size_default() { return 5;   } // delete 5 at a time (very safe)
-function wts_auto_delay_ms()             { return 2000; } // 2s pause between batches
+// Draft 100 at a time
+function wts_draft_batch_size_default()  { return 100; }
+// Delete 10 at a time (safe)
+function wts_delete_batch_size_default() { return 10;  }
+// 2s pause between auto-continue batches
+function wts_auto_delay_ms()             { return 2000; }
 
-// ---------------------------
-// Batch: Move to Draft
-// ---------------------------
+/* ---------------------------
+ * Batch: Move to Draft
+ * --------------------------- */
 function draft_properties_with_expired_status_batch($batch_size = null, $page_num = 1, $status_slugs = []) {
     if ($batch_size === null) $batch_size = wts_draft_batch_size_default();
     if (empty($status_slugs)) $status_slugs = wts_status_slugs_default();
@@ -37,7 +36,7 @@ function draft_properties_with_expired_status_batch($batch_size = null, $page_nu
         'posts_per_page' => (int) $batch_size,
         'paged'          => (int) $page_num,
         'fields'         => 'ids',
-        'no_found_rows'  => false, // we need max_num_pages
+        'no_found_rows'  => false, // need max_num_pages
         'tax_query'      => [[
             'taxonomy' => 'es_status',
             'field'    => 'slug',
@@ -69,14 +68,14 @@ function draft_properties_with_expired_status_batch($batch_size = null, $page_nu
     ];
 }
 
-// ---------------------------
-// Batch: Delete Drafts (preserve media)
-//   - removes post row
-//   - removes postmeta
-//   - removes term relationships
-//   - DOES NOT delete attachments
-//   - NEW: detaches any attachments first (post_parent=0, post_author=0)
-// ---------------------------
+/* ---------------------------
+ * Batch: Delete Drafts (preserve media)
+ *   - detaches attachments (post_parent=0, post_author=0)
+ *   - removes term relationships
+ *   - removes postmeta
+ *   - removes the property row
+ *   - does NOT delete attachment rows/files
+ * --------------------------- */
 function delete_draft_properties_with_status_batch($batch_size = null, $page_num = 1, $status_slugs = []) {
     if ($batch_size === null) $batch_size = wts_delete_batch_size_default();
     if (empty($status_slugs)) $status_slugs = wts_status_slugs_default();
@@ -87,7 +86,7 @@ function delete_draft_properties_with_status_batch($batch_size = null, $page_num
         'posts_per_page' => (int) $batch_size,
         'paged'          => (int) $page_num,
         'fields'         => 'ids',
-        'no_found_rows'  => false, // we need max_num_pages
+        'no_found_rows'  => false, // need max_num_pages
         'tax_query'      => [[
             'taxonomy' => 'es_status',
             'field'    => 'slug',
@@ -104,37 +103,43 @@ function delete_draft_properties_with_status_batch($batch_size = null, $page_num
         global $wpdb;
 
         foreach ($q->posts as $post_id) {
-            // Clean cache for the property first
+            // 0) Clear cache for the property
             clean_post_cache($post_id);
 
-            // --- NEW: DETACH ATTACHMENTS (keep media, remove DB link) ---
-            // 1) Get IDs of attachments that have this property as parent
-            $att_ids = $wpdb->get_col( $wpdb->prepare(
-                "SELECT ID FROM {$wpdb->posts} WHERE post_type='attachment' AND post_parent=%d",
-                (int)$post_id
-            ) );
+            // 1) Find attachment IDs with this post as parent
+            $att_ids = $wpdb->get_col(
+                $wpdb->prepare(
+                    "SELECT ID FROM {$wpdb->posts} WHERE post_type='attachment' AND post_parent=%d",
+                    (int) $post_id
+                )
+            );
+
+            // 2) Detach all attachments in one query (keep files, remove link)
+            $wpdb->query(
+                $wpdb->prepare(
+                    "UPDATE {$wpdb->posts}
+                     SET post_parent=0, post_author=0
+                     WHERE post_type='attachment' AND post_parent=%d",
+                    (int) $post_id
+                )
+            );
+
+            // 3) Clear attachment object caches
             if (!empty($att_ids)) {
-                // 2) Set post_parent=0 and post_author=0 in one go
-                $wpdb->query( $wpdb->prepare(
-                    "UPDATE {$wpdb->posts} SET post_parent=0, post_author=0 WHERE post_type='attachment' AND post_parent=%d",
-                    (int)$post_id
-                ) );
-                // 3) Clear attachment object caches
                 foreach ($att_ids as $aid) {
-                    clean_post_cache((int)$aid);
+                    clean_post_cache((int) $aid);
                 }
             }
-            // --- end detach ---
 
-            // Remove term relationships & postmeta (keeps media untouched)
-            $wpdb->delete($wpdb->term_relationships, ['object_id' => $post_id]);
-            $wpdb->delete($wpdb->postmeta,           ['post_id'   => $post_id]);
+            // 4) Remove term relationships & postmeta for the property
+            $wpdb->delete($wpdb->term_relationships, ['object_id' => (int) $post_id]);
+            $wpdb->delete($wpdb->postmeta,           ['post_id'   => (int) $post_id]);
 
-            // Remove the post itself (only the property row)
-            $wpdb->delete($wpdb->posts, ['ID' => $post_id, 'post_type' => 'properties']);
+            // 5) Remove the property row itself
+            $wpdb->delete($wpdb->posts, ['ID' => (int) $post_id, 'post_type' => 'properties']);
 
-            // Best effort cache clear
-            wp_cache_delete($post_id, 'posts');
+            // 6) Best-effort cache clear
+            wp_cache_delete((int) $post_id, 'posts');
 
             $deleted++;
         }
@@ -149,9 +154,9 @@ function delete_draft_properties_with_status_batch($batch_size = null, $page_num
     ];
 }
 
-// ---------------------------
-// Admin Page
-// ---------------------------
+/* ---------------------------
+ * Admin Page
+ * --------------------------- */
 function wts_register_expired_draft_admin_page() {
     add_submenu_page(
         'tools.php',
@@ -169,9 +174,9 @@ function wts_expired_draft_admin_page() {
 
     // Hidden defaults
     $status_slugs_str   = implode(',', wts_status_slugs_default());
-    $draft_batch_size   = wts_draft_batch_size_default();
-    $delete_batch_size  = wts_delete_batch_size_default();
-    $delay_ms           = wts_auto_delay_ms();
+    $draft_batch_size   = wts_draft_batch_size_default();   // 100
+    $delete_batch_size  = wts_delete_batch_size_default();  // 10
+    $delay_ms           = wts_auto_delay_ms();              // 2000
 
     // ---- Run Draft Batch
     $draft_result = null; $draft_ran = false;
@@ -188,7 +193,6 @@ function wts_expired_draft_admin_page() {
         $delete_result = delete_draft_properties_with_status_batch($delete_batch_size, $page);
         $delete_ran = true;
     }
-
     ?>
     <div class="wrap">
         <h1>Manage Expired/Withdrawn Properties</h1>
@@ -253,7 +257,7 @@ function wts_expired_draft_admin_page() {
                     <?php wp_nonce_field('wts_draft_expired_action'); ?>
                     <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($status_slugs_str); ?>">
                     <input type="hidden" name="wts_draft_batch_size"  value="<?php echo (int) $draft_batch_size; ?>">
-                    <input type="hidden" name="wts_draft_page"        value="<?php echo esc_attr(($draft_result['page'] + 1)); ?>">
+                    <input type="hidden" name="wts_draft_page"        value="<?php echo esc_attr($draft_result['page'] + 1); ?>">
                     <input type="hidden" name="wts_run_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Draft Batch</button></p>
                 </form>
@@ -266,7 +270,7 @@ function wts_expired_draft_admin_page() {
 
         <!-- Step 2 -->
         <h2>Step 2: Delete Drafted Properties (Batch Mode)</h2>
-        <p>Deletes <strong>Draft</strong> properties with the target statuses in very small, safe batches. Media files are <strong>preserved</strong>. Batch size: <code><?php echo (int) $delete_batch_size; ?></code></p>
+        <p>Deletes <strong>Draft</strong> properties with the target statuses in small, safe batches. Media files are <strong>preserved</strong> (attachments detached). Batch size: <code><?php echo (int) $delete_batch_size; ?></code></p>
 
         <?php if ($delete_ran && $delete_result): ?>
             <div class="notice notice-warning">
@@ -299,7 +303,7 @@ function wts_expired_draft_admin_page() {
                 <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
                 <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($status_slugs_str); ?>">
                 <input type="hidden" name="wts_delete_batch_size"  value="<?php echo (int) $delete_batch_size; ?>">
-                <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
+                <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr($delete_result['page'] + 1); ?>">
                 <input type="hidden" name="wts_delete_auto_continue" value="<?php echo !empty($_POST['wts_delete_auto_continue']) ? '1' : ''; ?>">
                 <input type="hidden" name="wts_run_delete_draft_expired" value="1">
             </form>
@@ -313,7 +317,7 @@ function wts_expired_draft_admin_page() {
                     <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
                     <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($status_slugs_str); ?>">
                     <input type="hidden" name="wts_delete_batch_size"  value="<?php echo (int) $delete_batch_size; ?>">
-                    <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
+                    <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr($delete_result['page'] + 1); ?>">
                     <input type="hidden" name="wts_run_delete_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Delete Batch</button></p>
                 </form>

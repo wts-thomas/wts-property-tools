@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.5.2 - 10-10-2025
+- Semi final stable revisions to run batch delete and find orphaned images.
+
 2.5.1 - 10-10-2025
 - Revising Orphaned Media functions via Batch Delete.
 
