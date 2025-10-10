@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.4.6 - 10-10-2025
+- Refactoring and MySQL optimizations for Batch Deleting.
+
 2.4.5 - 10-10-2025
 - Detach attachments before deleting properties.
 
