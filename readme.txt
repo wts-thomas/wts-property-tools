@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.4.0 - 10-10-2025
+- Revised Batch functions to use AJAX
+
 2.3.6 - 10-09-2025
 - Optimzed Batch Draft and Batch Delete functions.
 
