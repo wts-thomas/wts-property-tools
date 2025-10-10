@@ -75,6 +75,7 @@ function draft_properties_with_expired_status_batch($batch_size = null, $page_nu
 //   - removes postmeta
 //   - removes term relationships
 //   - DOES NOT delete attachments
+//   - NEW: detaches any attachments first (post_parent=0, post_author=0)
 // ---------------------------
 function delete_draft_properties_with_status_batch($batch_size = null, $page_num = 1, $status_slugs = []) {
     if ($batch_size === null) $batch_size = wts_delete_batch_size_default();
@@ -103,8 +104,27 @@ function delete_draft_properties_with_status_batch($batch_size = null, $page_num
         global $wpdb;
 
         foreach ($q->posts as $post_id) {
-            // Clean caches first
+            // Clean cache for the property first
             clean_post_cache($post_id);
+
+            // --- NEW: DETACH ATTACHMENTS (keep media, remove DB link) ---
+            // 1) Get IDs of attachments that have this property as parent
+            $att_ids = $wpdb->get_col( $wpdb->prepare(
+                "SELECT ID FROM {$wpdb->posts} WHERE post_type='attachment' AND post_parent=%d",
+                (int)$post_id
+            ) );
+            if (!empty($att_ids)) {
+                // 2) Set post_parent=0 and post_author=0 in one go
+                $wpdb->query( $wpdb->prepare(
+                    "UPDATE {$wpdb->posts} SET post_parent=0, post_author=0 WHERE post_type='attachment' AND post_parent=%d",
+                    (int)$post_id
+                ) );
+                // 3) Clear attachment object caches
+                foreach ($att_ids as $aid) {
+                    clean_post_cache((int)$aid);
+                }
+            }
+            // --- end detach ---
 
             // Remove term relationships & postmeta (keeps media untouched)
             $wpdb->delete($wpdb->term_relationships, ['object_id' => $post_id]);
@@ -233,7 +253,7 @@ function wts_expired_draft_admin_page() {
                     <?php wp_nonce_field('wts_draft_expired_action'); ?>
                     <input type="hidden" name="wts_draft_status_slugs" value="<?php echo esc_attr($status_slugs_str); ?>">
                     <input type="hidden" name="wts_draft_batch_size"  value="<?php echo (int) $draft_batch_size; ?>">
-                    <input type="hidden" name="wts_draft_page"        value="<?php echo esc_attr($draft_result['page'] + 1); ?>">
+                    <input type="hidden" name="wts_draft_page"        value="<?php echo esc_attr(($draft_result['page'] + 1)); ?>">
                     <input type="hidden" name="wts_run_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Draft Batch</button></p>
                 </form>
@@ -279,7 +299,7 @@ function wts_expired_draft_admin_page() {
                 <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
                 <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($status_slugs_str); ?>">
                 <input type="hidden" name="wts_delete_batch_size"  value="<?php echo (int) $delete_batch_size; ?>">
-                <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr($delete_result['page'] + 1); ?>">
+                <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
                 <input type="hidden" name="wts_delete_auto_continue" value="<?php echo !empty($_POST['wts_delete_auto_continue']) ? '1' : ''; ?>">
                 <input type="hidden" name="wts_run_delete_draft_expired" value="1">
             </form>
@@ -293,7 +313,7 @@ function wts_expired_draft_admin_page() {
                     <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
                     <input type="hidden" name="wts_delete_status_slugs" value="<?php echo esc_attr($status_slugs_str); ?>">
                     <input type="hidden" name="wts_delete_batch_size"  value="<?php echo (int) $delete_batch_size; ?>">
-                    <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr($delete_result['page'] + 1); ?>">
+                    <input type="hidden" name="wts_delete_page"        value="<?php echo esc_attr(($delete_result['page'] + 1)); ?>">
                     <input type="hidden" name="wts_run_delete_draft_expired" value="1">
                     <p><button class="button button-secondary">Run Next Delete Batch</button></p>
                 </form>

@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.5.1 - 10-10-2025
+- Revising Orphaned Media functions via Batch Delete.
+
 2.5.0 - 10-10-2025
 - Revising Orphaned Media functions to find Estatik imported images.
 
