@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.4.3 - 10-10-2025
+- Adjusting Batch Delete functions with changing batch number to five.
+
 2.4.2 - 10-10-2025
 - Changed Draft Delete function to "5".
 
