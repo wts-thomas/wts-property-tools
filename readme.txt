@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.5.0 - 10-10-2025
+- Revising Orphaned Media functions to find Estatik imported images.
+
 2.4.6 - 10-10-2025
 - Refactoring and MySQL optimizations for Batch Deleting.
 
