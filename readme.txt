@@ -1,5 +1,9 @@
 == Changelog ==
 
+2.4.4 - 10-10-2025
+- Batch function adjustments.
+- Adjustments over the last several versions have been to prevent server timeout issues.
+
 2.4.3 - 10-10-2025
 - Adjusting Batch Delete functions with changing batch number to five.
 
