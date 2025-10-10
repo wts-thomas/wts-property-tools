@@ -1,12 +1,13 @@
 <?php
 /**
  * Tools → Property Statuses
- * Batched Draft & Delete
+ * Batched Draft & Delete (GoDaddy-friendly)
  *
  * - Draft batch size: 100
  * - Delete batch size: 5
  * - 2s pause between batches
  * - Per-deletion flush + 0.25s delay to keep the connection alive
+ * - NEW: Detach attachments before deleting properties (media stays)
  */
 
 /** Default status slugs used by both steps. */
@@ -29,7 +30,7 @@ function wts_get_publish_ids_for_draft($batch_size, $page_num, $status_slugs = [
         'fields'                 => 'ids',
         'orderby'                => 'ID',
         'order'                  => 'ASC',
-        'no_found_rows'          => true,   // avoid COUNT(*)
+        'no_found_rows'          => true,
         'cache_results'          => false,
         'update_post_meta_cache' => false,
         'update_post_term_cache' => false,
@@ -67,7 +68,7 @@ function wts_get_draft_ids_for_delete($batch_size, $page_num, $status_slugs = []
         'fields'                 => 'ids',
         'orderby'                => 'ID',
         'order'                  => 'ASC',
-        'no_found_rows'          => true,   // avoid COUNT(*)
+        'no_found_rows'          => true,
         'cache_results'          => false,
         'update_post_meta_cache' => false,
         'update_post_term_cache' => false,
@@ -93,6 +94,31 @@ function wts_get_draft_ids_for_delete($batch_size, $page_num, $status_slugs = []
     return [$ids, $has_more];
 }
 
+/** Detach all attachments + remove featured image for a post (prevents media deletion). */
+function wts_detach_all_attachments($post_id) {
+    // Remove featured image link to avoid the attachment being treated specially.
+    delete_post_thumbnail($post_id);
+
+    // Grab all attachments that are hard-attached to this post.
+    $attachments = get_children([
+        'post_parent' => $post_id,
+        'post_type'   => 'attachment',
+        'numberposts' => -1,
+        'post_status' => 'any',
+        'fields'      => 'ids',
+    ]);
+
+    if (!empty($attachments)) {
+        foreach ($attachments as $att_id) {
+            // Set parent to 0 so wp_delete_post on the parent won't cascade to the attachment.
+            wp_update_post([
+                'ID'          => (int) $att_id,
+                'post_parent' => 0,
+            ]);
+        }
+    }
+}
+
 /** One draft batch. */
 function draft_properties_with_expired_status_batch($batch_size = 100, $page_num = 1, $status_slugs = []) {
     list($ids, $has_more) = wts_get_publish_ids_for_draft($batch_size, $page_num, $status_slugs);
@@ -111,21 +137,23 @@ function draft_properties_with_expired_status_batch($batch_size = 100, $page_num
 }
 
 /**
- * One delete batch with per-item flush + tiny delay.
- * Default batch size is **5** to keep requests very short on GoDaddy.
+ * One delete batch with per-item flush + tiny delay, and **no media deletion**.
+ * Default batch size is **5** to keep requests short on GoDaddy.
  */
 function delete_draft_properties_with_status_batch($batch_size = 5, $page_num = 1, $status_slugs = []) {
     list($ids, $has_more) = wts_get_draft_ids_for_delete($batch_size, $page_num, $status_slugs);
 
     $deleted = 0;
     foreach ($ids as $post_id) {
+        // NEW: Detach attachments first so media stays in the library.
+        wts_detach_all_attachments($post_id);
+
         if (wp_delete_post($post_id, true)) {
             $deleted++;
             // Keep the connection “alive” for host proxies (GoDaddy 504s).
             echo str_repeat(' ', 1024);
             if (function_exists('flush')) { @flush(); }
             if (function_exists('ob_flush')) { @ob_flush(); }
-            // Small pause to smooth I/O pressure.
             usleep(250000); // 0.25s
         }
     }
@@ -230,7 +258,7 @@ function wts_expired_draft_admin_page() {
 
         <!-- STEP 2 -->
         <h2>Step 2: Delete Drafted Properties (Batch Mode)</h2>
-        <p>Deletes all <strong>Draft</strong> properties with these statuses in very small, safe batches:<br>
+        <p>Deletes all <strong>Draft</strong> properties with these statuses in very small, safe batches (media is preserved):<br>
             <code><?php echo esc_html($status_label); ?></code><br>
             Batch size: <strong>5</strong>
         </p>
@@ -246,7 +274,7 @@ function wts_expired_draft_admin_page() {
             </div>
         <?php endif; ?>
 
-        <form method="post" onsubmit="return confirm('Are you sure? This permanently deletes matching draft posts.')">
+        <form method="post" onsubmit="return confirm('Are you sure? This permanently deletes matching draft posts (media will be kept).')">
             <?php wp_nonce_field('wts_delete_draft_expired_action'); ?>
             <input type="hidden" name="wts_delete_page" value="<?php echo esc_attr($_POST['wts_delete_page'] ?? 1); ?>">
             <p>

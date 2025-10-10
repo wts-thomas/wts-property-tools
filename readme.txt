@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.4.5 - 10-10-2025
+- Detach attachments before deleting properties.
+
 2.4.4 - 10-10-2025
 - Batch function adjustments.
 - Adjustments over the last several versions have been to prevent server timeout issues.
