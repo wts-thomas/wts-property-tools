@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.4.2 - 10-10-2025
+- Changed Draft Delete function to "5".
+
 2.4.1 - 10-10-2025
 - Restored Cron functions insead of using AJAX. AJAX not working during live testing.
 
