@@ -121,7 +121,7 @@ function wts_queue_post_notification($post_ID, $post_after, $post_before) {
 
     $notifications   = get_transient('wts_post_notifications') ?: [];
     $notifications[] = [
-        'status'         => $status_label,                           // <- Status instead of Type
+        'status'         => $status_label,
         'address'        => get_the_title($post_ID),
         'builder_raw'    => $builder_raw ?: 'N/A',
         'builder'        => $builder,
@@ -139,20 +139,20 @@ add_action('post_updated', 'wts_queue_post_notification', 10, 3);
 // ================================
 // AUTO-DRAFT NEWLY PUBLISHED PROPERTIES (ONE-TIME)
 // ================================
-function revert_properties_to_draft_on_first_publish($new_status, $old_status, $post) {
-    if ($post->post_type !== 'properties' || $new_status !== 'publish') return;
+// function revert_properties_to_draft_on_first_publish($new_status, $old_status, $post) {
+//     if ($post->post_type !== 'properties' || $new_status !== 'publish') return;
 
-    if (!get_post_meta($post->ID, '_auto_drafted_initially', true)) {
-        add_action('shutdown', function () use ($post) {
-            wp_update_post([
-                'ID'          => $post->ID,
-                'post_status' => 'draft',
-            ]);
-            update_post_meta($post->ID, '_auto_drafted_initially', 'yes');
-        });
-    }
-}
-add_action('transition_post_status', 'revert_properties_to_draft_on_first_publish', 10, 3);
+//     if (!get_post_meta($post->ID, '_auto_drafted_initially', true)) {
+//         add_action('shutdown', function () use ($post) {
+//             wp_update_post([
+//                 'ID'          => $post->ID,
+//                 'post_status' => 'draft',
+//             ]);
+//             update_post_meta($post->ID, '_auto_drafted_initially', 'yes');
+//         });
+//     }
+// }
+// add_action('transition_post_status', 'revert_properties_to_draft_on_first_publish', 10, 3);
 
 
 // ================================
@@ -178,7 +178,7 @@ function wts_queue_property_creation_fallback($post_ID, $post, $update) {
         'subdivision_raw' => $subdivision_raw ?: 'N/A',
         'subdivision'     => $subdivision,
         'match'           => $match_status,
-        'status'          => $status_label,            // <- include status
+        'status'          => $status_label,
         'action'          => 'created (re-import)',
     ];
     set_transient('wts_post_notifications', $notifications, 5 * MINUTE_IN_SECONDS);

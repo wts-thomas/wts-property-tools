@@ -1,5 +1,9 @@
 == Changelog ==
 
+2.6.2 - 10-13-2025
+- Disabled auto draft for new property imports.
+- Minor function refactoring for notifications.
+
 2.6.1 - 10-13-2025
 - Fixing php error with validation and function refactoring.
 
