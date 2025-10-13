@@ -98,14 +98,19 @@ function wts_queue_post_notification($post_ID, $post_after, $post_before) {
     $action = $is_new ? 'created' : 'updated';
 
     $builder_raw     = get_post_meta($post_ID, 'es_property_builder', true);
-    $builder         = wts_validate_builder($builder_raw);
     $subdivision_raw = get_post_meta($post_ID, 'es_property_subdivisionname', true);
-    $subdivision     = wts_validate_subdivision($subdivision_raw);
+
+    if (function_exists('wts_validate_builder'))     $builder     = wts_validate_builder($builder_raw);
+    else                                             $builder     = $builder_raw ?: 'N/A';
+
+    if (function_exists('wts_validate_subdivision')) $subdivision = wts_validate_subdivision($subdivision_raw);
+    else                                             $subdivision = $subdivision_raw ?: 'N/A';
 
     $match_status = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
 
     $notifications   = get_transient('wts_post_notifications') ?: [];
     $notifications[] = [
+        'post_id'         => (int) $post_ID,               // <— NEW: ensures we can fetch status
         'type'            => ucfirst($post_after->post_type),
         'address'         => get_the_title($post_ID),
         'builder_raw'     => $builder_raw ?: 'N/A',
@@ -182,34 +187,41 @@ function wts_send_post_notification_digest() {
     $admin_users = get_users(['role' => 'Administrator']);
     $emails = wp_list_pluck($admin_users, 'user_email');
 
-    $subject = wts_site_label() . ', Post/Property Digest: ' . count($notifications) . ' changes detected';
+    $site_title = get_bloginfo('name');
+    $subject = "{$site_title}, Post/Property Digest: " . count($notifications) . " changes detected";
 
     $rows = '';
     foreach ($notifications as $note) {
+        // Get property status term name(s)
+        $status_terms = get_the_terms(get_page_by_title($note['address'], OBJECT, 'properties'), 'es_status');
+        $status_label = (!empty($status_terms) && !is_wp_error($status_terms))
+            ? esc_html($status_terms[0]->name)
+            : 'N/A';
+
         $rows .= "<tr>
-            <td>" . esc_html($note['match']) . "</td>    
+            <td>" . esc_html($note['match']) . "</td>
             <td>" . esc_html($note['address']) . "</td>
             <td>" . esc_html($note['builder_raw']) . "</td>
             <td>" . esc_html($note['builder']) . "</td>
             <td>" . esc_html($note['subdivision_raw']) . "</td>
             <td>" . esc_html($note['subdivision']) . "</td>
-            <td>" . esc_html($note['type']) . "</td>
+            <td>" . esc_html($status_label) . "</td>
             <td>" . esc_html($note['action']) . "</td>
         </tr>";
     }
 
-    $message  = "<p>The following posts/properties were created or updated:</p>
+    $message = "<p>The following posts/properties were created or updated:</p>
         <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
             <thead>
                 <tr style='background:#f2f2f2;'>
-                     <th align='left'>Match (Yes/No)</th>     
-                     <th align='left'>Address</th>
-                     <th align='left'>Builder (Imported)</th>
-                     <th align='left'>Builder (From Site)</th>
-                     <th align='left'>Subdivision (Imported)</th>
-                     <th align='left'>Subdivision (From Site)</th>
-                     <th align='left'>Type</th>
-                     <th align='left'>Action</th>
+                    <th align='left'>Match (Yes/No)</th>
+                    <th align='left'>Address</th>
+                    <th align='left'>Builder (Imported)</th>
+                    <th align='left'>Builder (From Site)</th>
+                    <th align='left'>Subdivision (Imported)</th>
+                    <th align='left'>Subdivision (From Site)</th>
+                    <th align='left'>Status</th>
+                    <th align='left'>Action</th>
                 </tr>
             </thead>
             <tbody>{$rows}</tbody>
@@ -222,7 +234,6 @@ function wts_send_post_notification_digest() {
     }
     remove_filter('wp_mail_content_type', function() { return 'text/html'; });
 }
-add_action('shutdown', 'wts_send_post_notification_digest');
 
 
 // ================================
@@ -250,15 +261,22 @@ function wts_check_for_new_property_posts_to_notify() {
 
             $match_status = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
 
+            // inside the foreach ($query->posts as $post) loop:
+            $status_label = 'N/A';
+            $terms = get_the_terms($post->ID, 'es_status');
+            if (!empty($terms) && !is_wp_error($terms)) {
+               $status_label = $terms[0]->name;
+            }
+
             $rows .= "<tr>
-                  <td>" . esc_html($match_status) . "</td>    
-                  <td>" . esc_html(get_the_title($post->ID)) . "</td>
-                  <td>" . esc_html($builder_raw ?: 'N/A') . "</td>
-                  <td>" . esc_html($builder) . "</td>
-                  <td>" . esc_html($subdivision_raw ?: 'N/A') . "</td>
-                  <td>" . esc_html($subdivision) . "</td>
-                  <td>Property</td>
-                  <td>created</td>
+               <td>" . esc_html($match_status) . "</td>
+               <td>" . esc_html(get_the_title($post->ID)) . "</td>
+               <td>" . esc_html($builder_raw ?: 'N/A') . "</td>
+               <td>" . esc_html($builder) . "</td>
+               <td>" . esc_html($subdivision_raw ?: 'N/A') . "</td>
+               <td>" . esc_html($subdivision) . "</td>
+               <td>" . esc_html($status_label) . "</td>
+               <td>created</td>
             </tr>";
 
             update_post_meta($post->ID, '_wts_notification_sent', 'yes');
@@ -274,14 +292,14 @@ function wts_check_for_new_property_posts_to_notify() {
                 <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
                     <thead>
                         <tr style='background:#f2f2f2;'>
-                           <th align='left'>Match (Yes/No)</th>    
-                           <th align='left'>Address</th>
-                           <th align='left'>Builder (Imported)</th>
-                           <th align='left'>Builder (From Site)</th>
-                           <th align='left'>Subdivision (Imported)</th>
-                           <th align='left'>Subdivision (From Site)</th> 
-                           <th align='left'>Type</th>
-                           <th align='left'>Action</th>
+                        <th align='left'>Match (Yes/No)</th>
+                        <th align='left'>Address</th>
+                        <th align='left'>Builder (Imported)</th>
+                        <th align='left'>Builder (From Site)</th>
+                        <th align='left'>Subdivision (Imported)</th>
+                        <th align='left'>Subdivision (From Site)</th>
+                        <th align='left'>Status</th>
+                        <th align='left'>Action</th>
                         </tr>
                     </thead>
                     <tbody>{$rows}</tbody>
@@ -389,43 +407,44 @@ function wts_send_test_notification_email() {
     $admin_users = get_users(['role' => 'Administrator']);
     $emails = wp_list_pluck($admin_users, 'user_email');
 
-    $subject = wts_site_label() . ', Property Digest: Test Email';
+    $site_title = get_bloginfo('name');
+    $subject = "{$site_title}, Property Digest: Test Email";
 
     $rows = "
         <tr>
-            <td>Yes</td>    
+            <td>Yes</td>
             <td>1234 N Test Ave</td>
             <td>BuilderX</td>
             <td>BuilderX</td>
             <td>Subdivision A</td>
             <td>Subdivision A</td>
-            <td>Property</td>
+            <td>Expired</td>
             <td>created</td>
         </tr>
         <tr>
-            <td>No</td>    
+            <td>No</td>
             <td>5678 W Example St</td>
             <td>Unknown Builder</td>
             <td>N/A</td>
             <td>Subdivision Z</td>
             <td>N/A</td>
-            <td>Property</td>
+            <td>For Sale</td>
             <td>updated</td>
         </tr>
     ";
 
-    $message  = "<p>This is a <strong>test notification email</strong>. It shows how property updates will appear:</p>
+    $message = "<p>This is a <strong>test notification email</strong>. It shows how property updates will appear:</p>
         <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
             <thead>
                 <tr style='background:#f2f2f2;'>
-                     <th align='left'>Match (Yes/No)</th>    
-                     <th align='left'>Address</th>
-                     <th align='left'>Builder (Imported)</th>
-                     <th align='left'>Builder (From Site)</th>
-                     <th align='left'>Subdivision (Imported)</th>
-                     <th align='left'>Subdivision (From Site)</th>
-                     <th align='left'>Type</th>
-                     <th align='left'>Action</th>
+                    <th align='left'>Match (Yes/No)</th>
+                    <th align='left'>Address</th>
+                    <th align='left'>Builder (Imported)</th>
+                    <th align='left'>Builder (From Site)</th>
+                    <th align='left'>Subdivision (Imported)</th>
+                    <th align='left'>Subdivision (From Site)</th>
+                    <th align='left'>Status</th>
+                    <th align='left'>Action</th>
                 </tr>
             </thead>
             <tbody>{$rows}</tbody>

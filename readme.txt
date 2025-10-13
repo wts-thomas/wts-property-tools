@@ -1,7 +1,10 @@
 == Changelog ==
 
+2.6.0 - 10-13-2025
+- Replaced Type column in notification email to show property Status.
+
 2.5.2 - 10-10-2025
-- Semi final stable revisions to run batch delete and find orphaned images.
+- Semi final stable revisions to run batch delete and find orphaned image functions.
 
 2.5.1 - 10-10-2025
 - Revising Orphaned Media functions via Batch Delete.
