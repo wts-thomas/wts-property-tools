@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.6.1 - 10-13-2025
+- Fixing php error with validation and function refactoring.
+
 2.6.0 - 10-13-2025
 - Replaced Type column in notification email to show property Status.
 
