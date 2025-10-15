@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.6.3 - 10-13-2025
+- Increased time to 60min for email notifications.
+
 2.6.2 - 10-13-2025
 - Disabled auto draft for new property imports.
 - Minor function refactoring for notifications.

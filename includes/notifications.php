@@ -181,7 +181,7 @@ function wts_queue_property_creation_fallback($post_ID, $post, $update) {
         'status'          => $status_label,
         'action'          => 'created (re-import)',
     ];
-    set_transient('wts_post_notifications', $notifications, 5 * MINUTE_IN_SECONDS);
+    set_transient('wts_post_notifications', $notifications, 60 * MINUTE_IN_SECONDS);
 }
 add_action('save_post', 'wts_queue_property_creation_fallback', 20, 3);
 
@@ -321,8 +321,8 @@ function wts_check_for_new_property_posts_to_notify() {
 // ================================
 function wts_add_cron_interval($schedules) {
     $schedules['every15'] = [
-        'interval' => 15 * 60,
-        'display'  => __('Every 15 Minutes'),
+        'interval' => 60 * 60,
+        'display'  => __('Every 60 Minutes'),
     ];
     return $schedules;
 }
