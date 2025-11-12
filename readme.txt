@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.7.0 - 11-12-2025
+- Added field for manually entering email(s) for notifications
+
 2.6.3 - 10-13-2025
 - Increased time to 60min for email notifications.
 

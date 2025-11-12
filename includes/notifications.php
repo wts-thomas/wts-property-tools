@@ -1,21 +1,41 @@
 <?php
-// ================================
-// HELPERS
-// ================================
 
-// Site label for email subjects (decodes HTML entities safely)
+// ================================
+// HELPERS: Site Label & Recipients
+// ================================
 function wts_site_label() {
     return wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
 }
 
-// Read the es_status taxonomy for a post and return a printable label
-function wts_get_property_status_label( $post_id ) {
-    $terms = get_the_terms( $post_id, 'es_status' );
-    if ( is_wp_error( $terms ) || empty( $terms ) ) {
-        return '—';
+// Parse a string of emails (commas/semicolons/newlines) into a validated array
+function wts_parse_emails($raw) {
+    $raw = (string) $raw;
+    $parts = preg_split('/[,\s;]+/', $raw, -1, PREG_SPLIT_NO_EMPTY);
+    $valid = [];
+    if ($parts) {
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if (filter_var($p, FILTER_VALIDATE_EMAIL)) {
+                $valid[] = $p;
+            }
+        }
     }
-    // Join multiple, though you likely have one
-    return implode( ', ', wp_list_pluck( $terms, 'name' ) );
+    // de-dup
+    return array_values(array_unique($valid));
+}
+
+// Return the configured recipients, or fall back to admin emails
+function wts_get_notification_recipients() {
+    $saved = get_option('wts_notification_recipients', '');
+    $emails = wts_parse_emails($saved);
+
+    if (!empty($emails)) {
+        return $emails;
+    }
+
+    // Fallback to admins if nothing configured
+    $admin_users = get_users(['role' => 'Administrator']);
+    return wp_list_pluck($admin_users, 'user_email');
 }
 
 
@@ -104,7 +124,15 @@ function wts_validate_subdivision($subdivision_value) {
 
 // ================================
 // QUEUE NOTIFICATIONS ON CREATE/UPDATE
+// (Stores status label too; and uses Status column later)
 // ================================
+function wts_get_property_status_label($post_id) {
+    $terms = get_the_terms($post_id, 'es_status');
+    if (is_wp_error($terms) || empty($terms)) return 'N/A';
+    // If multiple terms, join names
+    return implode(', ', wp_list_pluck($terms, 'name'));
+}
+
 function wts_queue_post_notification($post_ID, $post_after, $post_before) {
     if (!in_array($post_after->post_type, ['post', 'properties'], true)) return;
 
@@ -116,19 +144,22 @@ function wts_queue_post_notification($post_ID, $post_after, $post_before) {
     $subdivision_raw = get_post_meta($post_ID, 'es_property_subdivisionname', true);
     $subdivision     = wts_validate_subdivision($subdivision_raw);
 
-    $status_label    = ($post_after->post_type === 'properties') ? wts_get_property_status_label($post_ID) : '—';
-    $match_status    = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
+    $match_status = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
+
+    // Capture human-friendly status if this is a property
+    $status_label = ($post_after->post_type === 'properties') ? wts_get_property_status_label($post_ID) : '-';
 
     $notifications   = get_transient('wts_post_notifications') ?: [];
     $notifications[] = [
-        'status'         => $status_label,
-        'address'        => get_the_title($post_ID),
-        'builder_raw'    => $builder_raw ?: 'N/A',
-        'builder'        => $builder,
-        'subdivision_raw'=> $subdivision_raw ?: 'N/A',
-        'subdivision'    => $subdivision,
-        'match'          => $match_status,
-        'action'         => $action,
+        'type'            => ucfirst($post_after->post_type),
+        'address'         => get_the_title($post_ID),
+        'builder_raw'     => $builder_raw ?: 'N/A',
+        'builder'         => $builder,
+        'subdivision_raw' => $subdivision_raw ?: 'N/A',
+        'subdivision'     => $subdivision,
+        'status'          => $status_label,
+        'action'          => $action,
+        'match'           => $match_status,
     ];
 
     set_transient('wts_post_notifications', $notifications, 5 * MINUTE_IN_SECONDS);
@@ -139,20 +170,20 @@ add_action('post_updated', 'wts_queue_post_notification', 10, 3);
 // ================================
 // AUTO-DRAFT NEWLY PUBLISHED PROPERTIES (ONE-TIME)
 // ================================
-// function revert_properties_to_draft_on_first_publish($new_status, $old_status, $post) {
-//     if ($post->post_type !== 'properties' || $new_status !== 'publish') return;
+function revert_properties_to_draft_on_first_publish($new_status, $old_status, $post) {
+    if ($post->post_type !== 'properties' || $new_status !== 'publish') return;
 
-//     if (!get_post_meta($post->ID, '_auto_drafted_initially', true)) {
-//         add_action('shutdown', function () use ($post) {
-//             wp_update_post([
-//                 'ID'          => $post->ID,
-//                 'post_status' => 'draft',
-//             ]);
-//             update_post_meta($post->ID, '_auto_drafted_initially', 'yes');
-//         });
-//     }
-// }
-// add_action('transition_post_status', 'revert_properties_to_draft_on_first_publish', 10, 3);
+    if (!get_post_meta($post->ID, '_auto_drafted_initially', true)) {
+        add_action('shutdown', function () use ($post) {
+            wp_update_post([
+                'ID'          => $post->ID,
+                'post_status' => 'draft',
+            ]);
+            update_post_meta($post->ID, '_auto_drafted_initially', 'yes');
+        });
+    }
+}
+add_action('transition_post_status', 'revert_properties_to_draft_on_first_publish', 10, 3);
 
 
 // ================================
@@ -164,11 +195,11 @@ function wts_queue_property_creation_fallback($post_ID, $post, $update) {
 
     $builder_raw     = get_post_meta($post_ID, 'es_property_builder', true);
     $builder         = wts_validate_builder($builder_raw);
-    $subdivision_raw = get_post_meta($post->ID, 'es_property_subdivisionname', true);
+    $subdivision_raw = get_post_meta($post_ID, 'es_property_subdivisionname', true);
     $subdivision     = wts_validate_subdivision($subdivision_raw);
 
-    $status_label    = wts_get_property_status_label($post_ID);
-    $match_status    = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
+    $match_status = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
+    $status_label = wts_get_property_status_label($post_ID);
 
     $notifications = get_transient('wts_post_notifications') ?: [];
     $notifications[] = [
@@ -177,11 +208,12 @@ function wts_queue_property_creation_fallback($post_ID, $post, $update) {
         'builder'         => $builder,
         'subdivision_raw' => $subdivision_raw ?: 'N/A',
         'subdivision'     => $subdivision,
-        'match'           => $match_status,
         'status'          => $status_label,
+        'type'            => 'Property',
         'action'          => 'created (re-import)',
+        'match'           => $match_status,
     ];
-    set_transient('wts_post_notifications', $notifications, 60 * MINUTE_IN_SECONDS);
+    set_transient('wts_post_notifications', $notifications, 5 * MINUTE_IN_SECONDS);
 }
 add_action('save_post', 'wts_queue_property_creation_fallback', 20, 3);
 
@@ -195,15 +227,14 @@ function wts_send_post_notification_digest() {
 
     delete_transient('wts_post_notifications');
 
-    $admin_users = get_users(['role' => 'Administrator']);
-    $emails = wp_list_pluck($admin_users, 'user_email');
+    $emails = wts_get_notification_recipients();
 
     $subject = wts_site_label() . ', Post/Property Digest: ' . count($notifications) . ' changes detected';
 
     $rows = '';
     foreach ($notifications as $note) {
         $rows .= "<tr>
-            <td>" . esc_html($note['match']) . "</td>    
+            <td>" . esc_html($note['match']) . "</td>
             <td>" . esc_html($note['address']) . "</td>
             <td>" . esc_html($note['builder_raw']) . "</td>
             <td>" . esc_html($note['builder']) . "</td>
@@ -218,7 +249,7 @@ function wts_send_post_notification_digest() {
         <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
             <thead>
                 <tr style='background:#f2f2f2;'>
-                     <th align='left'>Match (Yes/No)</th>     
+                     <th align='left'>Match (Yes/No)</th>
                      <th align='left'>Address</th>
                      <th align='left'>Builder (Imported)</th>
                      <th align='left'>Builder (From Site)</th>
@@ -232,11 +263,15 @@ function wts_send_post_notification_digest() {
         </table>
         <p>This message was generated automatically.</p>";
 
-    add_filter('wp_mail_content_type', function() { return 'text/html'; });
+    add_filter('wp_mail_content_type', function(){ return 'text/html'; });
+    $headers = [
+        'Content-Type: text/html; charset=UTF-8',
+        'From: ' . get_bloginfo('name') . ' <wordpress@' . $_SERVER['SERVER_NAME'] . '>'
+    ];
     foreach ($emails as $email) {
-        wp_mail($email, $subject, $message);
+        wp_mail($email, $subject, $message, $headers);
     }
-    remove_filter('wp_mail_content_type', function() { return 'text/html'; });
+    remove_filter('wp_mail_content_type', function(){ return 'text/html'; });
 }
 add_action('shutdown', 'wts_send_post_notification_digest');
 
@@ -251,6 +286,7 @@ function wts_check_for_new_property_posts_to_notify() {
         'posts_per_page' => -1,
         'meta_query'     => [[ 'key' => '_wts_notification_sent', 'compare' => 'NOT EXISTS' ]],
         'date_query'     => [[ 'after' => '1 day ago' ]],
+        'fields'         => 'ids',
     ];
 
     $query = new WP_Query($args);
@@ -258,18 +294,18 @@ function wts_check_for_new_property_posts_to_notify() {
     $rows  = '';
 
     if ($query->have_posts()) {
-        foreach ($query->posts as $post) {
-            $builder_raw     = get_post_meta($post->ID, 'es_property_builder', true);
+        foreach ($query->posts as $post_id) {
+            $builder_raw     = get_post_meta($post_id, 'es_property_builder', true);
             $builder         = wts_validate_builder($builder_raw);
-            $subdivision_raw = get_post_meta($post->ID, 'es_property_subdivisionname', true);
+            $subdivision_raw = get_post_meta($post_id, 'es_property_subdivisionname', true);
             $subdivision     = wts_validate_subdivision($subdivision_raw);
-            $status_label    = wts_get_property_status_label($post->ID);
+            $status_label    = wts_get_property_status_label($post_id);
 
             $match_status = ($builder !== 'N/A' && $subdivision !== 'N/A') ? 'Yes' : 'No';
 
             $rows .= "<tr>
-                  <td>" . esc_html($match_status) . "</td>    
-                  <td>" . esc_html(get_the_title($post->ID)) . "</td>
+                  <td>" . esc_html($match_status) . "</td>
+                  <td>" . esc_html(get_the_title($post_id)) . "</td>
                   <td>" . esc_html($builder_raw ?: 'N/A') . "</td>
                   <td>" . esc_html($builder) . "</td>
                   <td>" . esc_html($subdivision_raw ?: 'N/A') . "</td>
@@ -278,25 +314,23 @@ function wts_check_for_new_property_posts_to_notify() {
                   <td>created</td>
             </tr>";
 
-            update_post_meta($post->ID, '_wts_notification_sent', 'yes');
+            update_post_meta($post_id, '_wts_notification_sent', 'yes');
             $count++;
         }
 
         if ($count > 0) {
-            $admin_users = get_users(['role' => 'Administrator']);
-            $emails = wp_list_pluck($admin_users, 'user_email');
-
+            $emails  = wts_get_notification_recipients();
             $subject = wts_site_label() . ", Property Digest: {$count} new properties added";
             $message = "<p>The following new Property posts have been added in the last 24 hours:</p>
                 <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
                     <thead>
                         <tr style='background:#f2f2f2;'>
-                           <th align='left'>Match (Yes/No)</th>    
+                           <th align='left'>Match (Yes/No)</th>
                            <th align='left'>Address</th>
                            <th align='left'>Builder (Imported)</th>
                            <th align='left'>Builder (From Site)</th>
                            <th align='left'>Subdivision (Imported)</th>
-                           <th align='left'>Subdivision (From Site)</th> 
+                           <th align='left'>Subdivision (From Site)</th>
                            <th align='left'>Status</th>
                            <th align='left'>Action</th>
                         </tr>
@@ -305,8 +339,12 @@ function wts_check_for_new_property_posts_to_notify() {
                 </table>
                 <p>This message was generated automatically.</p>";
 
+            $headers = [
+                'Content-Type: text/html; charset=UTF-8',
+                'From: ' . get_bloginfo('name') . ' <wordpress@' . $_SERVER['SERVER_NAME'] . '>'
+            ];
             foreach ($emails as $email) {
-                wp_mail($email, $subject, $message, ['Content-Type: text/html; charset=UTF-8']);
+                wp_mail($email, $subject, $message, $headers);
             }
         }
     }
@@ -321,8 +359,8 @@ function wts_check_for_new_property_posts_to_notify() {
 // ================================
 function wts_add_cron_interval($schedules) {
     $schedules['every15'] = [
-        'interval' => 60 * 60,
-        'display'  => __('Every 60 Minutes'),
+        'interval' => 15 * 60,
+        'display'  => __('Every 15 Minutes'),
     ];
     return $schedules;
 }
@@ -339,9 +377,17 @@ add_action('wts_run_property_notification_checker', 'wts_check_for_new_property_
 
 
 // ================================
-// ADMIN PAGE WITH BUTTONS
+// ADMIN PAGE WITH BUTTONS (+ recipients field)
 // ================================
 function wts_check_properties_notification_page() {
+    // Save recipients
+    if (isset($_POST['wts_save_recipients']) && check_admin_referer('wts_save_recipients_action')) {
+        $raw = isset($_POST['wts_notification_recipients']) ? wp_unslash($_POST['wts_notification_recipients']) : '';
+        $clean_list = implode("\n", wts_parse_emails($raw)); // store pretty (one per line)
+        update_option('wts_notification_recipients', $clean_list);
+        echo '<div class="notice notice-success is-dismissible"><p>Notification recipients updated.</p></div>';
+    }
+
     if (isset($_POST['wts_run_notification_check']) && check_admin_referer('wts_notification_check_action')) {
         $count = wts_check_for_new_property_posts_to_notify();
         echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($count) . ' new properties were processed for notifications.</p></div>';
@@ -354,17 +400,28 @@ function wts_check_properties_notification_page() {
 
     if (isset($_POST['wts_send_test_email']) && check_admin_referer('wts_send_test_email_action')) {
         wts_send_test_notification_email();
-        echo '<div class="notice notice-info is-dismissible"><p>A test notification email has been sent to all admins.</p></div>';
+        echo '<div class="notice notice-info is-dismissible"><p>A test notification email has been sent to the configured recipients.</p></div>';
     }
 
+    $current_recipients = esc_textarea(get_option('wts_notification_recipients', ''));
     ?>
     <div class="wrap">
         <h1>Check Property Notifications</h1>
 
-        <p><strong>Manual Checker:</strong> Checks <code>properties</code> posts created in the last day that haven’t triggered a notification and emails a digest to admins.</p>
+        <h2>Notification Recipients</h2>
+        <p>Enter one or more email addresses, separated by commas, semicolons, or new lines. If left blank, emails go to all Admin users.</p>
+        <form method="post" style="max-width:600px;margin-bottom:20px;">
+            <?php wp_nonce_field('wts_save_recipients_action'); ?>
+            <textarea name="wts_notification_recipients" rows="4" style="width:100%;"><?php echo $current_recipients; ?></textarea>
+            <p><button type="submit" name="wts_save_recipients" class="button">Save Recipients</button></p>
+        </form>
+
+        <hr>
+
+        <p><strong>Manual Checker:</strong> Checks <code>properties</code> posts created in the last day that haven’t triggered a notification and emails a digest to recipients.</p>
         <form method="post" style="margin-bottom:20px;">
             <?php wp_nonce_field('wts_notification_check_action'); ?>
-            <input type="submit" name="wts_run_notification_check" class="button button-primary" value="Check and Notify Admins">
+            <input type="submit" name="wts_run_notification_check" class="button button-primary" value="Check and Notify">
         </form>
 
         <hr>
@@ -377,7 +434,7 @@ function wts_check_properties_notification_page() {
 
         <hr>
 
-        <p><strong>Send Test Email:</strong> Sends a sample digest email to all admins so you can verify formatting.</p>
+        <p><strong>Send Test Email:</strong> Sends a sample digest email to the configured recipients.</p>
         <form method="post">
             <?php wp_nonce_field('wts_send_test_email_action'); ?>
             <input type="submit" name="wts_send_test_email" class="button" value="Send Test Email">
@@ -403,14 +460,13 @@ add_action('admin_menu', 'wts_register_notification_checker_page');
 // SEND TEST NOTIFICATION EMAIL
 // ================================
 function wts_send_test_notification_email() {
-    $admin_users = get_users(['role' => 'Administrator']);
-    $emails = wp_list_pluck($admin_users, 'user_email');
+    $emails = wts_get_notification_recipients();
 
     $subject = wts_site_label() . ', Property Digest: Test Email';
 
     $rows = "
         <tr>
-            <td>Yes</td>    
+            <td>Yes</td>
             <td>1234 N Test Ave</td>
             <td>BuilderX</td>
             <td>BuilderX</td>
@@ -420,7 +476,7 @@ function wts_send_test_notification_email() {
             <td>created</td>
         </tr>
         <tr>
-            <td>No</td>    
+            <td>No</td>
             <td>5678 W Example St</td>
             <td>Unknown Builder</td>
             <td>N/A</td>
@@ -435,7 +491,7 @@ function wts_send_test_notification_email() {
         <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
             <thead>
                 <tr style='background:#f2f2f2;'>
-                     <th align='left'>Match (Yes/No)</th>    
+                     <th align='left'>Match (Yes/No)</th>
                      <th align='left'>Address</th>
                      <th align='left'>Builder (Imported)</th>
                      <th align='left'>Builder (From Site)</th>
@@ -449,7 +505,15 @@ function wts_send_test_notification_email() {
         </table>
         <p>This test message was generated automatically.</p>";
 
+    $headers = [
+        'Content-Type: text/html; charset=UTF-8',
+        'From: ' . get_bloginfo('name') . ' <wordpress@' . $_SERVER['SERVER_NAME'] . '>'
+    ];
+
+    @ob_end_flush();
+    @flush();
+
     foreach ($emails as $email) {
-        wp_mail($email, $subject, $message, ['Content-Type: text/html; charset=UTF-8']);
+        wp_mail($email, $subject, $message, $headers);
     }
 }
