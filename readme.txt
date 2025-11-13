@@ -1,5 +1,8 @@
 == Changelog ==
 
+2.7.1 - 11-12-2025
+- Refactored Notifications to reduce email notifications to 6 hours
+
 2.7.0 - 11-12-2025
 - Added field for manually entering email(s) for notifications
 

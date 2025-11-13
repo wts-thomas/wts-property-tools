@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WTS Property Tools
  * Description: Custom notifications, property cleanup, and utility functions for real estate websites.
- * Version: 2.7.0
+ * Version: 2.7.1
  * Author: Thomas Rainer
  * Author URI: https://wtsks.com
  * Plugin URI: https://github.com/wts-thomas/wts-property-tools
