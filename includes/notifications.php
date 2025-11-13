@@ -140,6 +140,7 @@ function wts_get_notification_recipients() {
 // ================================
 // QUEUE NOTIFICATIONS ON CREATE/UPDATE
 // ================================
+
 function wts_queue_post_notification($post_ID, $post_after, $post_before) {
     if (!in_array($post_after->post_type, ['post', 'properties'], true)) return;
 
@@ -175,25 +176,27 @@ add_action('post_updated', 'wts_queue_post_notification', 10, 3);
 // ================================
 // AUTO-DRAFT NEWLY PUBLISHED PROPERTIES (ONE-TIME)
 // ================================
-function revert_properties_to_draft_on_first_publish($new_status, $old_status, $post) {
-    if ($post->post_type !== 'properties' || $new_status !== 'publish') return;
 
-    if (!get_post_meta($post->ID, '_auto_drafted_initially', true)) {
-        add_action('shutdown', function () use ($post) {
-            wp_update_post([
-                'ID'          => $post->ID,
-                'post_status' => 'draft',
-            ]);
-            update_post_meta($post->ID, '_auto_drafted_initially', 'yes');
-        });
-    }
-}
-add_action('transition_post_status', 'revert_properties_to_draft_on_first_publish', 10, 3);
+// function revert_properties_to_draft_on_first_publish($new_status, $old_status, $post) {
+//     if ($post->post_type !== 'properties' || $new_status !== 'publish') return;
+
+//     if (!get_post_meta($post->ID, '_auto_drafted_initially', true)) {
+//         add_action('shutdown', function () use ($post) {
+//             wp_update_post([
+//                 'ID'          => $post->ID,
+//                 'post_status' => 'draft',
+//             ]);
+//             update_post_meta($post->ID, '_auto_drafted_initially', 'yes');
+//         });
+//     }
+// }
+// add_action('transition_post_status', 'revert_properties_to_draft_on_first_publish', 10, 3);
 
 
 // ================================
 // NOTIFICATIONS FOR AUTO IMPORTS (FALLBACK)
 // ================================
+
 function wts_queue_property_creation_fallback($post_ID, $post, $update) {
     if ($post->post_type !== 'properties' || $update) return;
     if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
@@ -225,6 +228,7 @@ add_action('save_post', 'wts_queue_property_creation_fallback', 20, 3);
 // ================================
 // SEND DIGEST EMAIL (TABLE FORMAT) — QUEUED CHANGES
 // ================================
+
 function wts_send_post_notification_digest() {
     $notifications = get_transient('wts_post_notifications');
     if (!$notifications) return;
@@ -277,6 +281,7 @@ function wts_send_post_notification_digest() {
 // ================================
 // MANUAL PROPERTY CHECKER (used by Cron too)
 // ================================
+
 function wts_check_for_new_property_posts_to_notify() {
     $args = [
         'post_type'      => 'properties',
@@ -350,35 +355,38 @@ function wts_check_for_new_property_posts_to_notify() {
 
 
 // ================================
-// CRON SCHEDULE – every 6 hours
+// CRON SCHEDULE – every hour
 // ================================
+
 function wts_add_cron_interval($schedules) {
-    $schedules['wts_every_6_hours'] = [
-        'interval' => 6 * HOUR_IN_SECONDS,
-        'display'  => __('Every 6 Hours', 'wts'),
+    $schedules['wts_every_1_hour'] = [
+        'interval' => HOUR_IN_SECONDS, // 3600 seconds
+        'display'  => __('Every Hour', 'wts'),
     ];
     return $schedules;
 }
 add_filter('cron_schedules', 'wts_add_cron_interval');
 
 function wts_schedule_property_notification_checker() {
-    // Clear any existing schedules for this hook so we can enforce the 6-hour interval
+    // Clear any existing schedules for this hook so we can enforce the 1-hour interval
     $timestamp = wp_next_scheduled('wts_run_property_notification_checker');
     while ($timestamp) {
         wp_unschedule_event($timestamp, 'wts_run_property_notification_checker');
         $timestamp = wp_next_scheduled('wts_run_property_notification_checker');
     }
 
-    // Schedule fresh
-    wp_schedule_event(time(), 'wts_every_6_hours', 'wts_run_property_notification_checker');
+    // Schedule fresh – runs once per hour
+    wp_schedule_event(time(), 'wts_every_1_hour', 'wts_run_property_notification_checker');
 }
 add_action('wp', 'wts_schedule_property_notification_checker');
 
 /**
- * Cron handler: runs both property checker and queued digest every 6 hours.
+ * Cron handler: runs both property checker and queued digest every hour.
  */
 function wts_run_all_property_digests() {
+    // New properties in last 24h (each only once, due to meta flag)
     wts_check_for_new_property_posts_to_notify();
+    // All queued edits/imports in the transient
     wts_send_post_notification_digest();
 }
 add_action('wts_run_property_notification_checker', 'wts_run_all_property_digests');
@@ -387,6 +395,7 @@ add_action('wts_run_property_notification_checker', 'wts_run_all_property_digest
 // ================================
 // ADMIN PAGE WITH BUTTONS
 // ================================
+
 function wts_check_properties_notification_page() {
     // Save recipients
     if (isset($_POST['wts_save_notification_recipients']) && check_admin_referer('wts_save_notification_recipients_action')) {
@@ -436,7 +445,7 @@ function wts_check_properties_notification_page() {
 
         <hr>
 
-        <p><strong>Simulate Cron Run (Local Testing):</strong> Runs the same function the cron job executes every 6 hours—right now.</p>
+        <p><strong>Simulate Cron Run (Local Testing):</strong> Runs the same function the cron job executes every hour—right now.</p>
         <form method="post" style="margin-bottom:20px;">
             <?php wp_nonce_field('wts_notification_cron_action'); ?>
             <input type="submit" name="wts_run_notification_cron" class="button button-secondary" value="Run Cron Job Now">
@@ -469,6 +478,7 @@ add_action('admin_menu', 'wts_register_notification_checker_page');
 // ================================
 // SEND TEST NOTIFICATION EMAIL
 // ================================
+
 function wts_send_test_notification_email() {
     $emails = wts_get_notification_recipients();
     if (empty($emails)) return;

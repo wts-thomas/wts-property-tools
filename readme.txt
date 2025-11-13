@@ -1,5 +1,9 @@
 == Changelog ==
 
+2.7.2 - 11-13-2025
+- Additional edits to digest email settings.
+- Commented out (disabled) auto-draft.
+
 2.7.1 - 11-12-2025
 - Refactored Notifications to reduce email notifications to 6 hours
 
