@@ -1,5 +1,9 @@
 == Changelog ==
 
+2.7.3 - 11-13-2025
+- Changed some wording for notifications.
+- Changed name of plugin to Property Tools.
+
 2.7.2 - 11-13-2025
 - Additional edits to digest email settings.
 - Commented out (disabled) auto-draft.

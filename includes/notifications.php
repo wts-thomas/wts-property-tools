@@ -324,7 +324,7 @@ function wts_check_for_new_property_posts_to_notify() {
             $emails = wts_get_notification_recipients();
             if (!empty($emails)) {
                 $subject = wts_site_label() . ", Property Digest: {$count} new properties added";
-                $message = "<p>The following new Property posts have been added in the last 24 hours:</p>
+                $message = "<p>The following new Property posts have been added in the last 1 hour:</p>
                     <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;'>
                         <thead>
                             <tr style='background:#f2f2f2;'>
